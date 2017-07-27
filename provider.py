@@ -2,26 +2,29 @@ import web
 import os
 import sys
 from os.path import join
-import glob
 import tarfile
-import datetime, time
-import optparse
 import logging
 from wsgilog import WsgiLog
-import uuid
 import psycopg2
 from configparser import ConfigParser
-from time import gmtime, strftime
 import multiprocessing as mp
+import json
+
+__author__    =   "Camilo Nunez Fernandez"
+__version__   =   1.8
+__licence__   =   "GPL v.2"
+__file__      =   "provider.py"
+__desc__      =   """File provider for fits"""
 
 pjoin = os.path.join
 runtime_dir = pjoin('/data/chivo_provider_files/')
 fitsPath = pjoin('/data/data_pub/fits_delivery_pub/files/')
-pathTarballsTemp=pjoin('/data/chivo_provider_files/tarballs/')
+pathTarballsTemp=pjoin('/data/data_pub/cache_provider/')
 pathLog=pjoin('/data/chivo_provider_files/log/')
 pathconfdb=pjoin(runtime_dir,'config.ini')
 
 portApp=9000
+
 
 num_procs = mp.cpu_count()
 
@@ -41,8 +44,14 @@ def read_db_postgres_config(filename=pathconfdb, section='postgres'):
 urls = (
 	'/fitsprovider', 'FitsProvider',
 	'/error', 'Error',
-	'/notfound', 'NotFound'
+	'/notfound', 'NotFound',
+	'/confirm','ConfirmDown'
 )
+
+render_templates_path = pjoin('/data/chivo_provider_files/templates/')
+#render = web.template.render(render_templates_path,globals=template_globals, base="layout")
+render = web.template.render(render_templates_path)
+providerMain = web.application(urls, globals())
 
 class FileLog(WsgiLog):
 	def __init__(self, application):
@@ -56,6 +65,8 @@ class FileLog(WsgiLog):
 			file = web.config.log_file,
 			loglevel = logging.DEBUG
 		)
+
+
 	def __call__(self, environ, start_response):
 		def hstart_response(status, response_headers, *args):
 			out = start_response(status, response_headers, *args)
@@ -107,7 +118,6 @@ def packTarball(files,nameFile):
             p = mp.Process(target=tar.add, args=(file,file.split("/")[-1],))
             p.start()
             processes.append(p)
-            #tar.add(file,arcname = file.split("/")[-1])
         while not len(processes) == 0:
             proc = processes.pop(0)
             if proc.is_alive():
@@ -118,10 +128,23 @@ def packTarball(files,nameFile):
         tar.close()
     return pathTarball
 
-#http://vo.chivo.cl:9000/fitsprovider?mous=A001_X147_X2a6&ra=259.4001208333&dec=-33.70245555556		#423kb
-#http://vo.chivo.cl:9000/fitsprovider?mous=A001_X147_X29a&ra=261.2&dec=-34.2						#4.7GB arriba
-#http://vo.chivo.cl:9000/fitsprovider?mous=A001_X144_X81&ra=194.046525&dec=-5.789316666667			#1.9MB
-#http://10.6.91.206:8080/fitsprovider?mous=A002_X628157_X5&ra=0.4888333333333&dec=-15.44708333333
+class ConfirmDown(object):
+	def GET(self):
+		user_data = web.input()
+		
+		if user_data and user_data.mous:
+			mous_in = user_data.mous
+			files_found = filesPathsXmous(mous_in)
+			if len(files_found)!=0:
+				lengthFile = 0
+				for file in files_found:
+					lengthFile += os.path.getsize(file)
+				return render.displaydata(lengthFile,mous_in)				
+			else:
+				raise web.redirect('/notfound')
+		else:
+			raise web.redirect('/error')
+
 class FitsProvider(object):
 	def GET(self):
 		user_data = web.input()
@@ -141,13 +164,13 @@ class FitsProvider(object):
 						if not buf:
 							break
 						yield buf
-				except:
+				except Exception as e:
+					print(e)
 					raise web.redirect('/error')				
 			else:
 				raise web.redirect('/notfound')
 		else:
-			raise web.redirect('/error')
-
+			raise web.redirect('/notfound')
 
 class Error(object):
 	def GET(self):
@@ -155,18 +178,13 @@ class Error(object):
 
 class NotFound(object):
 	def GET(self):
-		return '<h1>File not found.</h1>'
-		
+		return '''<h1>Nothing Found.</h1>'''
 
 if __name__ == "__main__":
-	render_templates_path = pjoin('/data/chivo_provider_files/templates/')
-	render = web.template.render(render_templates_path)
-	app = web.application(urls, globals())
-
-	#nameLogFile=str(strftime("%Y-%m-%d %H:%M:%S", gmtime()))+str(uuid.uuid4())+".log"
-	#web.config.log_file = pjoin(pathLog,nameLogFile)
+	template_globals = {"json_encode": json.dumps}
+	
+	web.config.log_file = pjoin(pathLog,"provider.log")
 	web.config.debug=True
-	#web.config.log_toprint = False
-	#web.config.log_tofile = True
-	#web.httpserver.runsimple(app.wsgifunc(FileLog), ("0.0.0.0", portApp))
-	web.httpserver.runsimple(app.wsgifunc(), ("0.0.0.0", portApp))
+	web.config.log_toprint = False
+	web.config.log_tofile = True
+	web.httpserver.runsimple(providerMain.wsgifunc(FileLog), ("0.0.0.0", portApp))
