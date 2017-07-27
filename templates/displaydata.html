@@ -1,0 +1,22 @@
+$def with(tam,mous_searh)
+<!doctype html>
+<html>
+    <head>
+    <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.2.1/jquery.min.js"></script>
+    </head>
+    <body>
+      <script>
+          var mous_in = "$mous_searh";
+          var lengthFile = "$tam";
+          var directionUrl = "http://vo.chivo.cl:9000/fitsprovider?mous=";
+          var enGIgas = Math.round(((lengthFile/1024)/1024)/1025);
+          var confirmed = confirm("The total size of files is: "+enGIgas+" [GB] \nContinue ?");
+          if (confirmed){
+            window.location.replace(directionUrl+mous_in);
+          } else {
+            alert('Download Cancelled');
+            window.close();
+          }
+      </script>
+    </body>
+</html>
